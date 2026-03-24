@@ -6,7 +6,16 @@ import plotly.graph_objects as go
 # 1. 페이지 설정
 st.set_page_config(page_title="내 집 마련 시뮬레이터", layout="centered", page_icon="🏢")
 
-# --- 유틸리티 함수: 한글 화폐 단위 표시 ---
+# 스타일 커스텀: 메트릭 폰트 크기 조절
+st.markdown("""
+    <style>
+    .small-font { font-size: 1.1rem !important; font-weight: 600; color: #555; }
+    .main-val { font-size: 1.8rem !important; font-weight: 800; color: #111; margin-bottom: 5px; }
+    .sub-val { font-size: 0.95rem; color: #666; line-height: 1.5; }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- 유틸리티 함수 ---
 def format_won(val_man):
     if val_man == 0: return "0원"
     abs_val = abs(val_man)
@@ -17,7 +26,6 @@ def format_won(val_man):
     if man > 0 or uk == 0: res += f"{man:,}만원"
     return f"-{res.strip()}" if val_man < 0 else res.strip()
 
-# --- 상환 방식별 스케줄 계산 함수 ---
 def get_full_schedule(principal_man, annual_rate, years, method):
     n = int(years * 12)
     if n <= 0 or principal_man <= 0: return pd.DataFrame()
@@ -25,7 +33,6 @@ def get_full_schedule(principal_man, annual_rate, years, method):
     p_won = principal_man * 10000
     schedule = []
     rem_p = p_won
-    
     for i in range(1, n + 1):
         if method == "원리금균등":
             m_pay = p_won * (r * (1+r)**n) / ((1+r)**n - 1) if r > 0 else p_won / n
@@ -35,31 +42,21 @@ def get_full_schedule(principal_man, annual_rate, years, method):
             pri_pay = p_won / n
             int_pay = rem_p * r
             m_pay = pri_pay + int_pay
-        
         rem_p -= pri_pay
-        schedule.append({
-            "month": i,
-            "year": (i-1)//12 + 1,
-            "total": int(m_pay),
-            "principal": int(pri_pay),
-            "interest": int(int_pay)
-        })
+        schedule.append({"month": i, "year": (i-1)//12 + 1, "total": int(m_pay), "principal": int(pri_pay), "interest": int(int_pay)})
     return pd.DataFrame(schedule)
 
-# --- 메인 UI ---
-st.title("🏠 내 집 마련 시뮬레이터 v8.0")
+# --- UI 입력부 (생략 없이 동일 유지) ---
+st.title("🏠 내 집 마련 시뮬레이터 v9.0")
 
 # 1️⃣ 주택 정보
 st.subheader("1️⃣ 주택 정보 및 한도")
 c1, c2 = st.columns(2)
-with c1:
-    house_price = st.number_input("주택 매매가 (만원)", value=80000, step=1000)
-    st.caption(f"👉 **{format_won(house_price)}**")
-with c2:
-    ltv_input = st.number_input("적용 LTV (%)", value=70, min_value=0, max_value=100)
-    max_ltv_won = house_price * ltv_input / 100
-    st.caption(f"최대 한도: {format_won(max_ltv_won)}")
-
+house_price = c1.number_input("주택 매매가 (만원)", value=80000, step=1000)
+c1.caption(f"👉 **{format_won(house_price)}**")
+ltv_input = c2.number_input("적용 LTV (%)", value=70, min_value=0, max_value=100)
+max_ltv_won = house_price * ltv_input / 100
+c2.caption(f"최대 한도: {format_won(max_ltv_won)}")
 tax_rate = 0.011 if house_price <= 60000 else (0.022 if house_price <= 90000 else 0.033)
 total_cost = house_price + (house_price * tax_rate)
 
@@ -68,13 +65,10 @@ st.divider()
 # 2️⃣ 자금 및 소득
 st.subheader("2️⃣ 나의 자금 및 소득")
 c3, c4 = st.columns(2)
-with c3:
-    my_cash = st.number_input("보유 현금 (만원)", value=30000, step=1000)
-    st.caption(f"👉 **{format_won(my_cash)}**")
-with c4:
-    annual_income = st.number_input("연봉 (만원)", value=6000, step=500)
-    st.caption(f"👉 **{format_won(annual_income)}**")
-
+my_cash = c3.number_input("보유 현금 (만원)", value=30000, step=1000)
+c3.caption(f"👉 **{format_won(my_cash)}**")
+annual_income = c4.number_input("연봉 (만원)", value=6000, step=500)
+c4.caption(f"👉 **{format_won(annual_income)}**")
 with st.expander("🏢 회사 대출(복지기금) 설정"):
     co_loan_amount = st.number_input("회사 대출액 (만원)", value=0, step=500)
     st.caption(f"👉 **{format_won(co_loan_amount)}**")
@@ -88,92 +82,85 @@ st.divider()
 # 3️⃣ 은행 대출
 st.subheader("3️⃣ 은행 대출 설정")
 c5, c6 = st.columns(2)
-with c5:
-    bank_loan_amount = st.number_input("은행 대출 신청액 (만원)", value=30000, step=1000)
-    st.caption(f"👉 **{format_won(bank_loan_amount)}**")
-with c6:
-    bank_rate = st.number_input("은행 금리 (%)", value=4.2)
-
+bank_loan_amount = c5.number_input("은행 대출 신청액 (만원)", value=30000, step=1000)
+c5.caption(f"👉 **{format_won(bank_loan_amount)}**")
+bank_rate = c6.number_input("은행 금리 (%)", value=4.2)
 c7, c8 = st.columns(2)
-with c7:
-    bank_term = st.number_input("은행 기간 (년)", value=30)
-with c8:
-    bank_method = st.selectbox("은행 상환", ["원리금균등", "원금균등"])
+bank_term = c7.number_input("은행 기간 (년)", value=30)
+bank_method = c8.selectbox("은행 상환", ["원리금균등", "원금균등"])
 
 # --- 계산 ---
 total_funding = my_cash + co_loan_amount + bank_loan_amount
 diff = total_funding - total_cost
+total_loan = bank_loan_amount + co_loan_amount
+bank_sched = get_full_schedule(bank_loan_amount, bank_rate, bank_term, bank_method)
+co_sched = get_full_schedule(co_loan_amount, co_loan_rate, co_loan_term, co_method)
 
 # --- 결과 발표 ---
 st.divider()
 st.subheader("💰 시뮬레이션 결과 리포트")
 
-# 1. 자금 비중 차트
-if total_funding > 0:
-    fund_df = pd.DataFrame({
-        "항목": ["내 돈", "회사 대출", "은행 대출"],
-        "금액": [my_cash, co_loan_amount, bank_loan_amount]
-    })
-    fund_df = fund_df[fund_df["금액"] > 0]
-    fig = px.pie(fund_df, values='금액', names='항목', hole=0.5, color_discrete_sequence=px.colors.qualitative.Pastel)
-    fig.update_layout(showlegend=True, height=300, margin=dict(t=0, b=0, l=0, r=0))
-    st.plotly_chart(fig, use_container_width=True)
+# 자금 상태 요약
+if diff > 0: st.info(f"✅ 자금 계획: **{format_won(diff)}** 초과 (여유)")
+elif diff == 0: st.success(f"✅ 자금 계획: 총 비용과 정확히 일치합니다.")
+else: st.error(f"⚠️ 자금 계획: **{format_won(abs(diff))}** 부족합니다.")
 
-# 2. 자금 상태 요약 (한 줄씩 배치)
-if diff > 0:
-    st.info(f"✅ 자금 계획: **{format_won(diff)}** 초과 (여유)")
-elif diff == 0:
-    st.success(f"✅ 자금 계획: 총 비용과 **정확히 일치**합니다.")
-else:
-    st.error(f"⚠️ 자금 계획: **{format_won(abs(diff))}** 부족합니다.")
-
-total_loan = bank_loan_amount + co_loan_amount
 if total_loan > max_ltv_won:
-    st.warning(f"🚨 LTV 한도: 신청액({format_won(total_loan)})이 한도({format_won(max_ltv_won)})를 **{format_won(total_loan - max_ltv_won)}** 초과")
-else:
-    st.write(f"🆗 LTV 한도: 규정 준수 (매수가 대비 **{(total_loan/house_price)*100:.1f}%**)")
+    st.warning(f"🚨 LTV 한도 초과: **{format_won(total_loan - max_ltv_won)}** 만큼 줄여야 합니다.")
 
-# 3. 상환 추이 그래프 및 DSR
-bank_sched = get_full_schedule(bank_loan_amount, bank_rate, bank_term, bank_method)
-co_sched = get_full_schedule(co_loan_amount, co_loan_rate, co_loan_term, co_method)
-
-# 상환액 합산 로직 (연도별)
+# 연도별 상환 추이 그래프
 max_years = int(max(bank_term, co_loan_term))
 annual_data = []
-
 for y in range(1, max_years + 1):
-    b_year = bank_sched[bank_sched['year'] == y] if not bank_sched.empty else pd.DataFrame()
-    c_year = co_sched[co_sched['year'] == y] if not co_sched.empty else pd.DataFrame()
-    
+    b_y = bank_sched[bank_sched['year'] == y] if not bank_sched.empty else pd.DataFrame()
+    c_y = co_sched[co_sched['year'] == y] if not co_sched.empty else pd.DataFrame()
     annual_data.append({
-        "연도": f"{y}년차",
-        "은행 원금": b_year['principal'].sum() / 10000 if not b_year.empty else 0,
-        "은행 이자": b_year['interest'].sum() / 10000 if not b_year.empty else 0,
-        "회사 원리금": (c_year['principal'].sum() + c_year['interest'].sum()) / 10000 if not c_year.empty else 0
+        "연도": f"{y}년",
+        "은행 원금": b_y['principal'].sum() if not b_y.empty else 0,
+        "은행 이자": b_y['interest'].sum() if not b_y.empty else 0,
+        "회사 상환액": (c_y['total'].sum()) if not c_y.empty else 0
     })
-
 df_annual = pd.DataFrame(annual_data)
 
-st.divider()
-st.subheader("📉 통합 상환 추이 (연도별)")
+st.write("### 📉 통합 상환 추이 (연도별)")
 fig_trend = go.Figure()
-fig_trend.add_trace(go.Bar(x=df_annual["연도"], y=df_annual["은행 원금"], name="은행 원금"))
-fig_trend.add_trace(go.Bar(x=df_annual["연도"], y=df_annual["은행 이자"], name="은행 이자"))
-fig_trend.add_trace(go.Bar(x=df_annual["연도"], y=df_annual["회사 원리금"], name="회사 대출(원리금)"))
-fig_trend.update_layout(barmode='stack', height=400, margin=dict(t=20, b=20), legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
+fig_trend.add_trace(go.Bar(x=df_annual["연도"], y=df_annual["은행 원금"], name="은행 원금", marker_color="#3498db"))
+fig_trend.add_trace(go.Bar(x=df_annual["연도"], y=df_annual["은행 이자"], name="은행 이자", marker_color="#2980b9"))
+fig_trend.add_trace(go.Bar(x=df_annual["연도"], y=df_annual["회사 상환액"], name="회사 상환액", marker_color="#e74c3c"))
+fig_trend.update_layout(
+    barmode='stack', height=400,
+    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), # 범례를 아래로 이동
+    margin=dict(t=20, b=100)
+)
 st.plotly_chart(fig_trend, use_container_width=True)
 
-# 4. 상환 요약 지표
+# 주요 지표 (폰트 크기 및 상세 내역 포함)
 monthly_bank = bank_sched["total"].iloc[0] if not bank_sched.empty else 0
 monthly_co = co_sched["total"].iloc[0] if not co_sched.empty else 0
 total_m = monthly_bank + monthly_co
 dsr = (total_m * 12 / 10000) / annual_income * 100
 
-col_f1, col_f2 = st.columns(2)
-col_f1.metric("첫 달 합계 상환액", f"{int(total_m):,}원")
-col_f2.metric("DSR 지수", f"{dsr:.1f}%")
+st.divider()
+col_m1, col_m2 = st.columns(2)
+with col_m1:
+    st.markdown(f'<p class="small-font">첫 달 상환액</p><p class="main-val">{total_m:,}원</p>', unsafe_allow_html=True)
+    st.markdown(f'<p class="sub-val">🏦 은행: {int(monthly_bank):,}원<br>🏢 회사: {int(monthly_co):,}원</p>', unsafe_allow_html=True)
+
+with col_m2:
+    st.markdown(f'<p class="small-font">DSR 지수</p><p class="main-val">{dsr:.1f}%</p>', unsafe_allow_html=True)
+    st.markdown(f'<p class="sub-val">연간 상환액: {format_won(total_m*12/10000)}<br>연 소득 대비 비중</p>', unsafe_allow_html=True)
 
 if dsr > 40:
-    st.error(f"🚨 DSR {dsr:.1f}%: 상환 부담이 매우 높거나 대출이 거절될 수 있습니다.")
+    st.error(f"⚠️ DSR {dsr:.1f}%: 상환 부담이 크며 대출 거절 가능성이 있습니다.")
 
-st.caption(f"※ 총 지불 이자 예상액: {format_won((bank_sched['interest'].sum() + co_sched['interest'].sum())/10000)}")
+# 연도별 상세 내역 표 (Expander)
+st.write("")
+with st.expander("📊 연도별 상세 상환 내역 표 보기"):
+    table_df = df_annual.copy()
+    table_df["연간 총액"] = table_df["은행 원금"] + table_df["은행 이자"] + table_df["회사 상환액"]
+    # 보기 좋게 포맷팅
+    for col in ["은행 원금", "은행 이자", "회사 상환액", "연간 총액"]:
+        table_df[col] = table_df[col].apply(lambda x: f"{int(x/10000):,}만원" if x > 0 else "0원")
+    st.dataframe(table_df, use_container_width=True)
+
+st.caption(f"※ 총 지불 이자 예상액: **{format_won((bank_sched['interest'].sum() + co_sched['interest'].sum())/10000)}**")
