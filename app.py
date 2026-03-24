@@ -4,14 +4,15 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 # 1. 페이지 설정
-st.set_page_config(page_title="내 집 마련 시뮬레이터", layout="centered", page_icon="🏢")
+st.set_page_config(page_title="내 집 마련 시뮬레이터 v10.0", layout="centered", page_icon="🏢")
 
-# 스타일 커스텀: 메트릭 폰트 크기 조절
+# 스타일 커스텀: 텍스트 색상을 흰색 계열로 강제 고정 (다크모드 대응)
 st.markdown("""
     <style>
-    .small-font { font-size: 1.1rem !important; font-weight: 600; color: #555; }
-    .main-val { font-size: 1.8rem !important; font-weight: 800; color: #111; margin-bottom: 5px; }
-    .sub-val { font-size: 0.95rem; color: #666; line-height: 1.5; }
+    .small-font { font-size: 1.1rem !important; font-weight: 600; color: #E0E0E0 !important; }
+    .main-val { font-size: 2.2rem !important; font-weight: 800; color: #FFFFFF !important; margin-bottom: 5px; }
+    .sub-val { font-size: 0.95rem; color: #BDBDBD !important; line-height: 1.6; }
+    div.stExpander { background-color: rgba(255, 255, 255, 0.05); border-radius: 10px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -46,8 +47,8 @@ def get_full_schedule(principal_man, annual_rate, years, method):
         schedule.append({"month": i, "year": (i-1)//12 + 1, "total": int(m_pay), "principal": int(pri_pay), "interest": int(int_pay)})
     return pd.DataFrame(schedule)
 
-# --- UI 입력부 (생략 없이 동일 유지) ---
-st.title("🏠 내 집 마련 시뮬레이터 v9.0")
+# --- UI 입력부 ---
+st.title("🏠 내 집 마련 시뮬레이터 v10.0")
 
 # 1️⃣ 주택 정보
 st.subheader("1️⃣ 주택 정보 및 한도")
@@ -62,13 +63,16 @@ total_cost = house_price + (house_price * tax_rate)
 
 st.divider()
 
-# 2️⃣ 자금 및 소득
+# 2️⃣ 자금 및 소득 (개인/부부합산 복구)
 st.subheader("2️⃣ 나의 자금 및 소득")
 c3, c4 = st.columns(2)
 my_cash = c3.number_input("보유 현금 (만원)", value=30000, step=1000)
 c3.caption(f"👉 **{format_won(my_cash)}**")
-annual_income = c4.number_input("연봉 (만원)", value=6000, step=500)
+
+income_type = c4.radio("소득 구분", ["개인", "부부합산"], horizontal=True)
+annual_income = c4.number_input(f"{income_type} 연봉 (만원)", value=6000, step=500)
 c4.caption(f"👉 **{format_won(annual_income)}**")
+
 with st.expander("🏢 회사 대출(복지기금) 설정"):
     co_loan_amount = st.number_input("회사 대출액 (만원)", value=0, step=500)
     st.caption(f"👉 **{format_won(co_loan_amount)}**")
@@ -96,7 +100,7 @@ total_loan = bank_loan_amount + co_loan_amount
 bank_sched = get_full_schedule(bank_loan_amount, bank_rate, bank_term, bank_method)
 co_sched = get_full_schedule(co_loan_amount, co_loan_rate, co_loan_term, co_method)
 
-# --- 결과 발표 ---
+# --- 결과 리포트 ---
 st.divider()
 st.subheader("💰 시뮬레이션 결과 리포트")
 
@@ -105,10 +109,7 @@ if diff > 0: st.info(f"✅ 자금 계획: **{format_won(diff)}** 초과 (여유)
 elif diff == 0: st.success(f"✅ 자금 계획: 총 비용과 정확히 일치합니다.")
 else: st.error(f"⚠️ 자금 계획: **{format_won(abs(diff))}** 부족합니다.")
 
-if total_loan > max_ltv_won:
-    st.warning(f"🚨 LTV 한도 초과: **{format_won(total_loan - max_ltv_won)}** 만큼 줄여야 합니다.")
-
-# 연도별 상환 추이 그래프
+# 연도별 상환 추이 그래프 (색상 최적화)
 max_years = int(max(bank_term, co_loan_term))
 annual_data = []
 for y in range(1, max_years + 1):
@@ -124,17 +125,21 @@ df_annual = pd.DataFrame(annual_data)
 
 st.write("### 📉 통합 상환 추이 (연도별)")
 fig_trend = go.Figure()
-fig_trend.add_trace(go.Bar(x=df_annual["연도"], y=df_annual["은행 원금"], name="은행 원금", marker_color="#3498db"))
-fig_trend.add_trace(go.Bar(x=df_annual["연도"], y=df_annual["은행 이자"], name="은행 이자", marker_color="#2980b9"))
-fig_trend.add_trace(go.Bar(x=df_annual["연도"], y=df_annual["회사 상환액"], name="회사 상환액", marker_color="#e74c3c"))
+# 색상 변경: 원금(연파랑), 이자(진파랑), 회사(부드러운 주황)
+fig_trend.add_trace(go.Bar(x=df_annual["연도"], y=df_annual["은행 원금"], name="은행 원금", marker_color="#5DADE2"))
+fig_trend.add_trace(go.Bar(x=df_annual["연도"], y=df_annual["은행 이자"], name="은행 이자", marker_color="#2E86C1"))
+fig_trend.add_trace(go.Bar(x=df_annual["연도"], y=df_annual["회사 상환액"], name="회사 상환액", marker_color="#EB984E"))
+
 fig_trend.update_layout(
     barmode='stack', height=400,
-    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5), # 범례를 아래로 이동
+    legend=dict(orientation="h", yanchor="top", y=-0.2, xanchor="center", x=0.5, font=dict(color="white")),
+    plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)',
+    font=dict(color="white"),
     margin=dict(t=20, b=100)
 )
 st.plotly_chart(fig_trend, use_container_width=True)
 
-# 주요 지표 (폰트 크기 및 상세 내역 포함)
+# 주요 지표 (텍스트 색상 수정)
 monthly_bank = bank_sched["total"].iloc[0] if not bank_sched.empty else 0
 monthly_co = co_sched["total"].iloc[0] if not co_sched.empty else 0
 total_m = monthly_bank + monthly_co
@@ -151,14 +156,13 @@ with col_m2:
     st.markdown(f'<p class="sub-val">연간 상환액: {format_won(total_m*12/10000)}<br>연 소득 대비 비중</p>', unsafe_allow_html=True)
 
 if dsr > 40:
-    st.error(f"⚠️ DSR {dsr:.1f}%: 상환 부담이 크며 대출 거절 가능성이 있습니다.")
+    st.warning(f"⚠️ DSR {dsr:.1f}%: 상환 부담이 크며 대출 거절 가능성이 있습니다.")
 
-# 연도별 상세 내역 표 (Expander)
+# 연도별 상세 내역 표
 st.write("")
 with st.expander("📊 연도별 상세 상환 내역 표 보기"):
     table_df = df_annual.copy()
     table_df["연간 총액"] = table_df["은행 원금"] + table_df["은행 이자"] + table_df["회사 상환액"]
-    # 보기 좋게 포맷팅
     for col in ["은행 원금", "은행 이자", "회사 상환액", "연간 총액"]:
         table_df[col] = table_df[col].apply(lambda x: f"{int(x/10000):,}만원" if x > 0 else "0원")
     st.dataframe(table_df, use_container_width=True)
