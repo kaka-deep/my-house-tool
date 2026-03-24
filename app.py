@@ -1,123 +1,168 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 
-# 1. 페이지 설정 (최대 너비를 제한하여 PC에서도 모바일처럼 깔끔하게 보이도록 함)
-st.set_page_config(page_title="주택 구매 시뮬레이터", layout="centered", page_icon="🏠")
+# 1. 페이지 설정
+st.set_page_config(page_title="내 집 마련 시뮬레이터 v4.0", layout="centered", page_icon="🏢")
 
-# 스타일 커스텀 (글자 크기 및 간격 조정)
-st.markdown("""
-    <style>
-    .main .block-container { max-width: 600px; padding-top: 2rem; }
-    div[data-testid="stMetricValue"] { font-size: 1.8rem; }
-    .stButton>button { width: 100%; border-radius: 10px; height: 3em; background-color: #007BFF; color: white; }
-    </style>
-    """, unsafe_allow_html=True)
-
-# 한국어 화폐 단위 변환 함수
+# --- 유틸리티 함수: 한글 화폐 단위 표시 ---
 def format_won(val_man):
-    if val_man < 10000: return f"{int(val_man):,}만원"
+    if val_man <= 0: return "0원"
     uk = val_man // 10000
     man = val_man % 10000
-    return f"{int(uk):,}억 {int(man):,}만원" if man > 0 else f"{int(uk):,}억원"
+    if uk > 0 and man > 0:
+        return f"{int(uk):,}억 {int(man):,}만원"
+    elif uk > 0:
+        return f"{int(uk):,}억원"
+    else:
+        return f"{int(man):,}만원"
 
-# 원리금 균등상환 계산기
-def calc_monthly(principal_man, rate, years):
-    if rate <= 0 or years <= 0: return int((principal_man * 10000) / (years * 12)) if years > 0 else 0
-    r = (rate / 100) / 12
-    n = years * 12
-    return int((principal_man * 10000) * (r * (1+r)**n) / ((1+r)**n - 1))
+# --- 상환 방식별 계산 함수 ---
+def get_repayment_schedule(principal_man, annual_rate, years, method):
+    n = int(years * 12)
+    r = (annual_rate / 100) / 12
+    principal_won = principal_man * 10000
+    
+    schedule = []
+    remaining_principal = principal_won
+    
+    if method == "원리금균등":
+        if r > 0:
+            monthly_payment = principal_won * (r * (1+r)**n) / ((1+r)**n - 1)
+        else:
+            monthly_payment = principal_won / n
+            
+        for i in range(1, n + 1):
+            interest_pay = remaining_principal * r
+            principal_pay = monthly_payment - interest_pay
+            remaining_principal -= principal_pay
+            schedule.append({
+                "월": i,
+                "상환액": int(monthly_payment),
+                "원금": int(principal_pay),
+                "이자": int(interest_pay),
+                "잔금": int(max(0, remaining_principal))
+            })
+            
+    else: # 원금균등
+        principal_pay = principal_won / n
+        for i in range(1, n + 1):
+            interest_pay = remaining_principal * r
+            monthly_payment = principal_pay + interest_pay
+            remaining_principal -= principal_pay
+            schedule.append({
+                "월": i,
+                "상환액": int(monthly_payment),
+                "원금": int(principal_pay),
+                "이자": int(interest_pay),
+                "잔금": int(max(0, remaining_principal))
+            })
+    return pd.DataFrame(schedule)
 
-# --- 데이터 정의 ---
-REGION_DATA = {
-    "비규제지역 (LTV 70%)": {"LTV": 0.70, "DSR": 0.40},
-    "과밀억제권역 (LTV 60%)": {"LTV": 0.60, "DSR": 0.40},
-    "투기과열지구 (LTV 50%)": {"LTV": 0.50, "DSR": 0.40}
-}
+# --- 메인 UI 시작 ---
+st.title("🏠 내 집 마련 시뮬레이터 v4.0")
 
-st.title("🏠 내 집 마련 시뮬레이터")
-st.info("항목별로 정보를 입력하면 실시간으로 분석 결과가 업데이트됩니다.")
+# --- STEP 1: 주택 정보 및 LTV ---
+st.subheader("1️⃣ 주택 정보 및 대출 한도 설정")
+col1_1, col1_2 = st.columns(2)
+with col1_1:
+    house_price = st.number_input("주택 매매가 (만원)", value=80000, step=1000)
+    st.caption(f"👉 {format_won(house_price)}")
+with col1_2:
+    ltv_input = st.number_input("적용 LTV (%)", value=70, min_value=0, max_value=100)
+    st.caption(f"최대 대출 가능액: {format_won(house_price * ltv_input / 100)}")
 
-# --- STEP 1: 주택 정보 ---
-st.subheader("1️⃣ 주택 및 세금 정보")
-region_name = st.selectbox("매수 예정 지역", list(REGION_DATA.keys()))
-house_price = st.number_input("주택 매매가 (만원)", value=80000, step=1000)
-is_large = st.radio("전용면적 85㎡ 초과여부", ["이하", "초과"], horizontal=True)
-
-# 취득세 계산 (간략화)
-tax_rate = 0.011 if house_price <= 60000 else (0.022 if house_price <= 90000 else 0.033)
-if is_large == "초과": tax_rate += 0.002
-acquisition_tax = house_price * tax_rate
-
-# --- STEP 2: 자금 및 소득 (회사 대출 포함) ---
+# --- STEP 2: 자금 및 소득 정보 ---
 st.divider()
-st.subheader("2️⃣ 내 자금 및 소득")
-my_cash = st.number_input("현재 보유 현금 (만원)", value=30000, step=1000)
-annual_income = st.number_input("본인 연봉 (만원)", value=6000, step=500)
+st.subheader("2️⃣ 나의 자금 및 소득")
+col2_1, col2_2 = st.columns(2)
+with col2_1:
+    my_cash = st.number_input("보유 현금 (만원)", value=30000, step=1000)
+    st.caption(f"👉 {format_won(my_cash)}")
+with col2_2:
+    annual_income = st.number_input("연봉 (만원)", value=6000, step=500)
+    st.caption(f"👉 {format_won(annual_income)}")
 
-with st.expander("🏢 회사 대출(복지기금)이 있다면 입력하세요"):
-    co_loan_amount = st.number_input("회사 대출 금액 (만원)", value=0, step=500)
+with st.expander("🏢 회사 대출 / 기타 대출 정보 (선택)"):
+    co_loan_amount = st.number_input("회사 대출액 (만원)", value=0, step=500)
     co_loan_rate = st.number_input("회사 대출 금리 (%)", value=2.0, step=0.1)
     co_loan_term = st.number_input("회사 대출 기간 (년)", value=10, step=1)
+    co_method = st.selectbox("회사 대출 상환 방식", ["원리금균등", "원금균등"], key="co")
+    other_annual_pay = st.number_input("기타 대출 연간 상환액 (만원)", value=0, step=100, help="신용대출, 자동차 할부 등")
 
-# --- STEP 3: 은행 대출 설정 ---
+# --- STEP 3: 은행 대출 및 상환 방식 ---
 st.divider()
-st.subheader("3️⃣ 은행 대출 조건")
-bank_rate = st.number_input("은행 대출 금리 (%)", value=4.2, step=0.1)
-bank_term = st.slider("은행 대출 기간 (년)", 10, 40, 30)
+st.subheader("3️⃣ 은행 대출 조건 설정")
+col3_1, col3_2, col3_3 = st.columns(3)
+with col3_1:
+    bank_rate = st.number_input("은행 금리 (%)", value=4.2, step=0.1)
+with col3_2:
+    bank_term = st.number_input("대출 기간 (년)", value=30, step=1)
+with col3_3:
+    bank_method = st.selectbox("은행 상환 방식", ["원리금균등", "원금균등"], key="bank")
 
-# --- 로직 계산 ---
-# 1. 은행 대출 한도 계산 (LTV)
-ltv_limit = (house_price * REGION_DATA[region_name]["LTV"]) - co_loan_amount # 회사대출만큼 LTV 한도 차감 가정
-needed_from_bank = max(0, house_price + acquisition_tax - my_cash - co_loan_amount)
-final_bank_loan = min(ltv_limit, needed_from_bank)
+# --- 계산 로직 ---
+# 취득세 (85㎡ 이하 기준 단순화)
+tax_rate = 0.011 if house_price <= 60000 else (0.022 if house_price <= 90000 else 0.033)
+total_needed = house_price + (house_price * tax_rate)
 
-# 2. 월 상환액 계산
-monthly_bank = calc_monthly(final_bank_loan, bank_rate, bank_term)
-monthly_co = calc_monthly(co_loan_amount, co_loan_rate, co_loan_term)
-total_monthly = monthly_bank + monthly_co
+# 은행 대출액 결정 (한도 내에서 부족한 만큼)
+max_bank_by_ltv = (house_price * ltv_input / 100) - co_loan_amount
+needed_bank = max(0, total_needed - my_cash - co_loan_amount)
+final_bank_loan = min(max_bank_by_ltv, needed_bank)
 
-# 3. 금리 시나리오 (+1%)
-monthly_bank_up = calc_monthly(final_bank_loan, bank_rate + 1.0, bank_term)
-total_monthly_up = monthly_bank_up + monthly_co
+# 스케줄 생성
+bank_sched = get_repayment_schedule(final_bank_loan, bank_rate, bank_term, bank_method)
+co_sched = get_repayment_schedule(co_loan_amount, co_loan_rate, co_loan_term, co_method)
+
+# 첫 달 상환액 및 연간 상환액(DSR용)
+first_month_pay = bank_sched["상환액"].iloc[0] + (co_sched["상환액"].iloc[0] if not co_sched.empty else 0)
+annual_bank_pay = bank_sched["상환액"].sum() / bank_term if not bank_sched.empty else 0
+annual_co_pay = co_sched["상환액"].sum() / co_loan_term if not co_sched.empty else 0
+total_annual_debt_pay = (annual_bank_pay + annual_co_pay + (other_annual_pay * 10000)) / 10000
+
+# DSR 계산
+dsr_value = (total_annual_debt_pay / annual_income) * 100
 
 # --- 결과 발표 ---
 st.divider()
-st.subheader("💰 최종 시뮬레이션 리포트")
+st.subheader("💰 시뮬레이션 결과 리포트")
 
-# 결과 요약 카드
-res_col1, res_col2 = st.columns(2)
-with res_col1:
-    st.metric("총 필요 자금", format_won(house_price + acquisition_tax))
-    st.caption(f"매매가 + 취득세({format_won(acquisition_tax)})")
-with res_col2:
-    shortage = max(0, house_price + acquisition_tax - my_cash - co_loan_amount - final_bank_loan)
-    if shortage > 0:
-        st.metric("부족한 자금", format_won(shortage), delta="-부족", delta_color="inverse")
-    else:
-        st.metric("자금 계획", "완료", delta="정상")
+# 결과 지표 표시
+m1, m2, m3 = st.columns(3)
+m1.metric("총 필요 자금", format_won(total_needed))
+m2.metric("은행 대출액", format_won(final_bank_loan))
+m3.metric("DSR 지수", f"{dsr_value:.1f}%")
 
-# 대출 구성 상세
+# DSR 기반 판정
+if dsr_value <= 40:
+    st.success(f"✅ **[안전]** DSR {dsr_value:.1f}%로 대출 실행 및 상환이 안정적인 수준입니다.")
+elif dsr_value <= 50:
+    st.warning(f"⚠️ **[주의]** DSR {dsr_value:.1f}%로 소득의 절반 가까이가 원리금 상환에 쓰입니다.")
+else:
+    st.error(f"🚨 **[위험]** DSR {dsr_value:.1f}%입니다. 은행 대출이 거절되거나 생활에 무리가 올 수 있습니다.")
+
+# 상세 요약
 with st.container():
-    st.write(f"✅ **은행 대출:** {format_won(final_bank_loan)} (금리 {bank_rate}%)")
-    st.write(f"✅ **회사 대출:** {format_won(co_loan_amount)} (금리 {co_loan_rate}%)")
-    st.markdown(f"### 💳 총 월 상환액: {total_monthly:,}원")
+    st.write(f"📌 **첫 달 상환액:** {int(first_month_pay):,}원 ({bank_method} 기준)")
+    shortage = max(0, total_needed - my_cash - co_loan_amount - final_bank_loan)
+    if shortage > 0:
+        st.error(f"❗ 자금이 {format_won(shortage)} 부족합니다. 현금을 더 확보하거나 대출을 늘려야 합니다.")
 
-# --- 그래프 (너비 최적화) ---
+# --- 상환 추세 그래프 ---
 st.divider()
-st.subheader("📈 금리 1% 상승 시 변화")
+st.subheader("📉 대출 상환 추세 비교")
 
-# 그래프 데이터
-compare_data = pd.DataFrame({
-    "구분": ["현재", "1% 상승"],
-    "월 상환액": [total_monthly, total_monthly_up]
-})
+# 데이터 정리 (연단위 요약)
+bank_sched['year'] = (bank_sched['월'] - 1) // 12 + 1
+annual_trend = bank_sched.groupby('year')[['원금', '이자']].sum() / 10000 # 만원 단위
 
-# 컬럼을 사용하여 그래프 너비를 중앙으로 제한
-empty1, chart_col, empty2 = st.columns([0.1, 0.8, 0.1])
-with chart_col:
-    st.bar_chart(compare_data.set_index("구분"), use_container_width=True)
+st.write("은행 대출 연도별 원금/이자 구성 변화")
+st.bar_chart(annual_trend)
 
-st.warning(f"금리가 1% 오르면 매월 **{total_monthly_up - total_monthly:,}원**을 더 내야 합니다.")
+# 금리 +1% 비교
+bank_sched_up = get_repayment_schedule(final_bank_loan, bank_rate + 1.0, bank_term, bank_method)
+monthly_up_diff = bank_sched_up["상환액"].iloc[0] - bank_sched["상환액"].iloc[0]
+st.info(f"💡 만약 금리가 1% 상승한다면, 첫 달 상환액이 **{int(monthly_up_diff):,}원** 증가합니다.")
 
-# 하단 정보
-st.caption("※ 본 계산은 원리금균등상환 기준이며 실제 대출 시 DSR, 부대비용 등에 따라 차이가 발생할 수 있습니다.")
+st.caption("※ 본 시뮬레이션은 입력값을 바탕으로 계산된 수치이며, 실제 대출 가능 여부와 금리는 금융기관을 통해 확인해야 합니다.")
