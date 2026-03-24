@@ -30,7 +30,8 @@ def format_won(val_man):
     if man > 0 or uk == 0: res += f"{man:,}만원"
     return f"-{res.strip()}" if val_man < 0 else res.strip()
 
-def get_full_schedule(principal_man, annual_rate, total_years, method, grace_years=0):
+# 거치 기간 및 무이자 로직 반영
+def get_full_schedule(principal_man, annual_rate, total_years, method, grace_years=0, is_interest_free_grace=False):
     n = int(total_years * 12)
     g = int(grace_years * 12)
     cols = ["month", "year", "total", "principal", "interest", "balance"]
@@ -42,11 +43,11 @@ def get_full_schedule(principal_man, annual_rate, total_years, method, grace_yea
     rem_p = p_won
     amort_months = max(1, n - g)
     for i in range(1, n + 1):
-        if i <= g:
-            int_pay = rem_p * r
+        if i <= g: # 거치 기간
+            int_pay = 0 if is_interest_free_grace else (rem_p * r)
             pri_pay = 0
             m_pay = int_pay
-        else:
+        else: # 상환 기간
             if method == "원리금균등":
                 m_pay = p_won * (r * (1+r)**amort_months) / ((1+r)**amort_months - 1) if r > 0 else p_won / amort_months
                 int_pay = rem_p * r
@@ -94,7 +95,13 @@ with st.expander("🏢 회사 대출(복지기금) 설정"):
     co_loan_rate = cc1.number_input("회사 금리 (%)", value=2.0)
     co_loan_term = cc2.number_input("회사 기간 (년)", value=10)
     co_method = cc3.selectbox("회사 상환", ["원리금균등", "원금균등"])
-    co_grace_period = st.selectbox("회사 대출 거치 기간 (년)", range(11), index=0)
+    
+    # [업데이트] 거치 기간 및 무이자 체크박스
+    c_grace1, c_grace2 = st.columns([1, 1])
+    co_grace_period = c_grace1.selectbox("거치 기간 (년)", range(11), index=0)
+    co_is_interest_free = c_grace2.checkbox("거치 중 무이자 적용", value=False)
+    if co_is_interest_free:
+        st.caption("✨ 거치 기간 동안 이자를 내지 않는 복지 혜택이 적용됩니다.")
 
 st.divider()
 
@@ -112,9 +119,10 @@ bank_method = c8.selectbox("은행 상환", ["원리금균등", "원금균등"])
 total_funding = my_cash + co_loan_amount + bank_loan_amount
 diff = total_funding - total_cost
 bank_sched = get_full_schedule(bank_loan_amount, bank_rate, bank_term, bank_method, grace_years=0)
-co_sched = get_full_schedule(co_loan_amount, co_loan_rate, co_loan_term, co_method, grace_years=co_grace_period)
+# [업데이트] 무이자 거치 여부 함수 전달
+co_sched = get_full_schedule(co_loan_amount, co_loan_rate, co_loan_term, co_method, grace_years=co_grace_period, is_interest_free_grace=co_is_interest_free)
 
-# 통합 데이터 가공 (월별)
+# 데이터 통합
 max_m = int(max(bank_term * 12, co_loan_term * 12)) if max(bank_term, co_loan_term) > 0 else 1
 monthly_rows = []
 for m in range(1, max_m + 1):
@@ -135,7 +143,7 @@ if diff > 0: st.info(f"✅ 자금 계획: **{format_won(diff)}** 초과 (여유)
 elif diff == 0: st.success(f"✅ 자금 계획: 총 비용과 정확히 일치합니다.")
 else: st.error(f"⚠️ 자금 계획: **{format_won(abs(diff))}** 부족합니다.")
 
-# 1. [복구] 통합 상환 추이 (연도별 막대 그래프)
+# 연도별 그래프
 st.write("### 📉 연도별 상환 구성 (원금/이자)")
 df_annual = df_monthly.groupby('year').agg({'은행 원금':'sum', '은행 이자':'sum', '회사 상환':'sum', '합계':'sum'}).reset_index()
 fig_annual = go.Figure()
@@ -146,7 +154,7 @@ fig_annual.update_layout(barmode='stack', height=400, legend=dict(orientation="h
                           plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"), margin=dict(t=20, b=100))
 st.plotly_chart(fig_annual, use_container_width=True)
 
-# 2. 주요 지표 (첫 달 및 DSR)
+# 주요 지표
 total_m = df_monthly["합계"].iloc[0] if not df_monthly.empty else 0
 dsr = (total_m * 12 / 10000) / annual_income * 100 if annual_income > 0 else 0
 c_m1, c_m2 = st.columns(2)
@@ -157,26 +165,20 @@ with c_m2:
     st.markdown(f'<p class="small-font">DSR 지수</p><p class="main-val">{dsr:.1f}%</p>', unsafe_allow_html=True)
     st.markdown(f'<p class="sub-val">연간 상환액: {format_won(total_m*12/10000)}<br>연 소득 대비 비중: {dsr:.1f}%</p>', unsafe_allow_html=True)
 
-# 3. [복구] 상세 데이터 표 (Expander)
+# 상세 데이터 표
 with st.expander("📊 연도별 상세 상환 내역 표 보기"):
     table_df = df_annual.copy()
     for col in ["은행 원금", "은행 이자", "회사 상환", "합계"]:
         table_df[col] = table_df[col].apply(lambda x: f"{int(x/10000):,}만원" if x > 0 else "0원")
     st.dataframe(table_df, use_container_width=True)
 
-# 4. [보너스] 월별 세부 영역 차트 (필요할 때만 확인)
-with st.expander("📉 월별 미세 추이 차트 보기"):
-    fig_monthly = px.area(df_monthly, x="month", y=["은행 원금", "은행 이자", "회사 상환"], color_discrete_map={"은행 원금":"#5DADE2", "은행 이자":"#2E86C1", "회사 상환":"#EB984E"})
-    fig_monthly.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font=dict(color="white"))
-    st.plotly_chart(fig_monthly, use_container_width=True)
-
-# 5. 유의사항 섹션
+# 유의사항 섹션
 st.markdown(f"""
 <div class="notice-box">
     <div class="notice-title">📢 시뮬레이션 유의사항</div>
-    <div class="notice-item">1. 본 결과는 단순 참고용이며, 정확한 한도와 금리는 반드시 <b>은행 상담</b>을 통해 확인하십시오.</div>
-    <div class="notice-item">2. 취득세는 85㎡ 이하 기본세율 기준으로 계산되었으며, 주택 수 및 면적에 따라 달라질 수 있습니다.</div>
-    <div class="notice-item">3. 중개수수료, 법무비용 등 약 1~2%의 <b>부대비용</b>을 별도로 예비비로 확보하시길 권장합니다.</div>
+    <div class="notice-item">1. 본 결과는 입력값을 바탕으로 한 단순 참고용이며, 정확한 한도와 금리는 반드시 <b>은행 상담</b>을 통해 확인하십시오.</div>
+    <div class="notice-item">2. 회사 복지 대출의 경우, 퇴직 시 상환 조건이나 거치 기간 종료 후 금리 변동 여부를 반드시 사내 규정에서 재확인하시기 바랍니다.</div>
+    <div class="notice-item">3. 주택 취득세 외에도 국민주택채권 매입비, 인지세, 중개 수수료 등 약 1~2%의 <b>부대 비용</b>이 추가로 발생할 수 있습니다.</div>
 </div>
 """, unsafe_allow_html=True)
 
