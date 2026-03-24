@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-# 1. 페이지 설정
+# 1. 페이지 설정 (브라우저 탭 제목)
 st.set_page_config(page_title="내 집 마련 시뮬레이터", layout="centered", page_icon="🏢")
 
 # 스타일 커스텀: 텍스트 색상 및 레이아웃 최적화
@@ -49,7 +49,8 @@ def get_full_schedule(principal_man, annual_rate, years, method):
     return pd.DataFrame(schedule)
 
 # --- UI 입력부 ---
-st.title("🏠 내 집 마련 시뮬레이터 v11.0")
+# 이 부분(46번 줄)에서 v11.0 문구를 삭제했습니다.
+st.title("🏠 내 집 마련 시뮬레이터")
 
 # 1️⃣ 주택 정보
 st.subheader("1️⃣ 주택 정보 및 한도")
